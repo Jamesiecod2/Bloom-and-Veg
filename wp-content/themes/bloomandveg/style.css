@@ -1,0 +1,20 @@
+/*
+Theme Name: Bloom & Veg
+Theme URI: https://example.com/
+Author: Bloom & Veg
+Author URI: https://example.com/
+Description: A lightweight starter theme with WooCommerce support.
+Version: 0.1.3
+Requires at least: 6.0
+Tested up to: 6.7
+Requires PHP: 7.4
+License: GNU General Public License v2 or later
+License URI: https://www.gnu.org/licenses/gpl-2.0.html
+Text Domain: bloomandveg
+Tags: custom-logo, custom-menu, featured-images, e-commerce, woocommerce, blog
+*/
+
+@import url("assets/css/main.css");
+
+/* Small safety net if a cache/CDN blocks the import */
+body{font-family:system-ui,-apple-system,Segoe UI,Roboto,Ubuntu,Cantarell,Noto Sans,Arial,sans-serif}

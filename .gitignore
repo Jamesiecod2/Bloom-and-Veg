@@ -137,3 +137,35 @@ dist
 # Vite logs files
 vite.config.js.timestamp-*
 vite.config.ts.timestamp-*
+
+# --- WordPress / Docker (local dev) ---
+# Keep custom theme tracked, ignore WP runtime + bundled content.
+wp-content/index.php
+
+# Ignore plugins (WooCommerce/Akismet/etc) in this repo
+wp-content/plugins/
+
+# Ignore bundled themes, keep our custom theme(s)
+wp-content/themes/*
+!wp-content/themes/bloomandveg/
+!wp-content/themes/bloomandveg/**
+!wp-content/themes/bloomandveg-child/
+!wp-content/themes/bloomandveg-child/**
+
+# Ignore runtime uploads + caches.
+wp-content/uploads/
+wp-content/cache/
+wp-content/upgrade/
+
+# Full-site clone restore workspace (Duplicator installer + extracted WordPress)
+clone/
+
+# Ignore container data volumes if created as folders (compose uses named volumes by default)
+db-data/
+
+# VS Code workspace settings
+.vscode/
+
+# Mac/Windows junk
+.DS_Store
+Thumbs.db

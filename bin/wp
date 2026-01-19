@@ -1,0 +1,29 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Run WP-CLI inside the running WordPress container.
+# This avoids keeping WordPress core files in the repo.
+# Usage:
+#   ./bin/wp core version
+#   ./bin/wp plugin list
+#   ./bin/wp theme list
+
+cd "$(dirname "$0")/.."
+
+# Ensure containers are up.
+docker compose up -d wordpress db >/dev/null
+
+# Install wp-cli in the container if missing.
+if ! docker compose exec -T wordpress bash -lc 'command -v wp >/dev/null 2>&1'; then
+	docker compose exec -T wordpress bash -lc '
+		set -euo pipefail
+		export DEBIAN_FRONTEND=noninteractive
+		apt-get update -y >/dev/null
+		apt-get install -y curl less mariadb-client >/dev/null
+		curl -sS -o /usr/local/bin/wp https://raw.githubusercontent.com/wp-cli/builds/gh-pages/phar/wp-cli.phar
+		chmod +x /usr/local/bin/wp
+	'
+fi
+
+# Run as www-data to avoid permission issues.
+docker compose exec -T -u www-data -e WP_CLI_CACHE_DIR=/tmp/wp-cli-cache wordpress wp --allow-root "$@"

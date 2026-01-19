@@ -1,0 +1,155 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+cd "$(dirname "$0")/.."
+
+if [[ -f .env ]]; then
+  # shellcheck disable=SC1091
+  source .env
+fi
+
+WP_SITE_URL=${WP_SITE_URL:-http://localhost:${WP_PORT:-8080}}
+WP_SITE_TITLE=${WP_SITE_TITLE:-"Bloom & Veg (Local)"}
+WP_ADMIN_USER=${WP_ADMIN_USER:-admin}
+WP_ADMIN_PASS=${WP_ADMIN_PASS:-change-me}
+WP_ADMIN_EMAIL=${WP_ADMIN_EMAIL:-admin@example.com}
+
+WORDPRESS_DB_ROOT_PASSWORD=${WORDPRESS_DB_ROOT_PASSWORD:-root}
+
+chmod +x bin/wp >/dev/null 2>&1 || true
+
+echo "Starting containers…"
+docker compose up -d
+
+echo "Waiting for database…"
+for i in {1..60}; do
+  if docker compose exec -T db mariadb-admin ping -uroot -p"$WORDPRESS_DB_ROOT_PASSWORD" --silent >/dev/null 2>&1; then
+    break
+  fi
+  sleep 2
+  if [[ $i -eq 60 ]]; then
+    echo "Database did not become ready in time." >&2
+    exit 1
+  fi
+done
+
+echo "Ensuring WordPress is installed…"
+if ! ./bin/wp core is-installed >/dev/null 2>&1; then
+  ./bin/wp core install \
+    --url="$WP_SITE_URL" \
+    --title="$WP_SITE_TITLE" \
+    --admin_user="$WP_ADMIN_USER" \
+    --admin_password="$WP_ADMIN_PASS" \
+    --admin_email="$WP_ADMIN_EMAIL" \
+    --skip-email
+fi
+
+# Nice defaults
+./bin/wp option update blogdescription "Online Farm Shop" >/dev/null
+./bin/wp rewrite structure '/%postname%/' --hard >/dev/null
+./bin/wp rewrite flush --hard >/dev/null
+
+echo "Installing WooCommerce…"
+if ! ./bin/wp plugin is-installed woocommerce >/dev/null 2>&1; then
+  ./bin/wp plugin install woocommerce --activate >/dev/null
+else
+  ./bin/wp plugin activate woocommerce >/dev/null 2>&1 || true
+fi
+
+# Helper functions
+page_ensure() {
+  local slug="$1"
+  local title="$2"
+  local content="$3"
+
+  local id
+  id=$(./bin/wp post list --post_type=page --pagename="$slug" --field=ID --format=ids || true)
+  if [[ -z "$id" ]]; then
+    ./bin/wp post create --post_type=page --post_status=publish --post_title="$title" --post_name="$slug" --post_content="$content" >/dev/null
+  fi
+}
+
+term_id_by_slug() {
+  local taxonomy="$1"
+  local slug="$2"
+  ./bin/wp term list "$taxonomy" --slug="$slug" --field=term_id --format=ids 2>/dev/null | tr -d '\n'
+}
+
+term_ensure() {
+  local taxonomy="$1"
+  local name="$2"
+  local slug="$3"
+  local parent_slug="${4:-}"
+
+  if [[ -n "$(term_id_by_slug "$taxonomy" "$slug")" ]]; then
+    return 0
+  fi
+
+  if [[ -n "$parent_slug" ]]; then
+    local parent_id
+    parent_id=$(term_id_by_slug "$taxonomy" "$parent_slug")
+    if [[ -n "$parent_id" ]]; then
+      ./bin/wp term create "$taxonomy" "$name" --slug="$slug" --parent="$parent_id" >/dev/null
+      return 0
+    fi
+  fi
+
+  ./bin/wp term create "$taxonomy" "$name" --slug="$slug" >/dev/null
+}
+
+echo "Creating starter pages…"
+page_ensure "home" "Home" "Welcome to Bloom & Veg (local build)."
+page_ensure "about" "About" ""
+page_ensure "delivery" "Delivery" ""
+page_ensure "contact" "Contact" ""
+page_ensure "faqs" "FAQs" ""
+
+# Set a static homepage
+HOME_ID=$(./bin/wp post list --post_type=page --pagename=home --field=ID --format=ids || true)
+if [[ -n "$HOME_ID" ]]; then
+  ./bin/wp option update show_on_front page >/dev/null
+  ./bin/wp option update page_on_front "$HOME_ID" >/dev/null
+fi
+
+echo "Creating Bloom & Veg product categories…"
+# Top-level categories (matching the live site slugs where visible)
+term_ensure product_cat "Fruit & Veg" "groceries"
+term_ensure product_cat "Dairy, Eggs & Chilled" "dairy"
+term_ensure product_cat "Bakery" "bakery"
+term_ensure product_cat "Food Cupboard" "food-cupboard"
+
+# Fruit & Veg children
+term_ensure product_cat "Fresh Fruit" "fruit" "groceries"
+term_ensure product_cat "Fresh Salad" "fresh-salad" "groceries"
+term_ensure product_cat "Fresh Vegetables" "vegetables" "groceries"
+term_ensure product_cat "Onions" "onions" "vegetables"
+term_ensure product_cat "Potatoes" "potatoes" "vegetables"
+term_ensure product_cat "Herbs" "herbs" "groceries"
+
+# Dairy children
+term_ensure product_cat "Butter & Spreads" "butter-spreads" "dairy"
+term_ensure product_cat "Cheese" "cheese" "dairy"
+term_ensure product_cat "Chilled Drinks" "chilled-drinks" "dairy"
+term_ensure product_cat "Creams" "creams" "dairy"
+term_ensure product_cat "Eggs" "eggs" "dairy"
+term_ensure product_cat "Meats & Sausages" "meats-sausages" "dairy"
+term_ensure product_cat "Milk" "milk" "dairy"
+
+# Bakery children
+term_ensure product_cat "Breads" "breads" "bakery"
+term_ensure product_cat "Cakes" "cakes" "bakery"
+term_ensure product_cat "Biscuits" "biscuits" "bakery"
+
+# Food Cupboard children
+term_ensure product_cat "Bottled Sauces" "bottled-sauces" "food-cupboard"
+term_ensure product_cat "Condiments / Pickles" "condiments-pickles" "food-cupboard"
+term_ensure product_cat "Cooking Sauces" "cooking-sauces" "food-cupboard"
+term_ensure product_cat "Gravy/Stock/Stuffing" "gravy-stock-stuffing" "food-cupboard"
+term_ensure product_cat "Herbs/Spice/Salt" "herbs-spice-salt" "food-cupboard"
+term_ensure product_cat "Jams & Spreads" "jams-spreads" "food-cupboard"
+term_ensure product_cat "Rice & Pasta" "rice-pasta" "food-cupboard"
+term_ensure product_cat "Tea & Coffee" "tea-coffee" "food-cupboard"
+term_ensure product_cat "Tinned Foods" "tinned-foods" "food-cupboard"
+
+echo "Done. Open: ${WP_SITE_URL}"
+echo "Admin: ${WP_SITE_URL}/wp-admin (user: ${WP_ADMIN_USER})"

@@ -1,0 +1,87 @@
+services:
+  db:
+    image: mariadb:11
+    restart: unless-stopped
+    environment:
+      MARIADB_DATABASE: ${WORDPRESS_DB_NAME:-wordpress}
+      MARIADB_USER: ${WORDPRESS_DB_USER:-wordpress}
+      MARIADB_PASSWORD: ${WORDPRESS_DB_PASSWORD:-wordpress}
+      MARIADB_ROOT_PASSWORD: ${WORDPRESS_DB_ROOT_PASSWORD:-root}
+    volumes:
+      - db-data:/var/lib/mysql
+
+  wordpress:
+    image: wordpress:php8.2-apache
+    depends_on:
+      - db
+    restart: unless-stopped
+    ports:
+      - "${WP_PORT:-8080}:80"
+    environment:
+      # Host port exposed by docker-compose (used to build correct URLs when running locally).
+      WP_PORT: ${WP_PORT:-8080}
+      WORDPRESS_DB_HOST: db:3306
+      WORDPRESS_DB_NAME: ${WORDPRESS_DB_NAME:-wordpress}
+      WORDPRESS_DB_USER: ${WORDPRESS_DB_USER:-wordpress}
+      WORDPRESS_DB_PASSWORD: ${WORDPRESS_DB_PASSWORD:-wordpress}
+      # Useful for dev; disable in production
+      WORDPRESS_DEBUG: ${WORDPRESS_DEBUG:-1}
+      # Support Codespaces/other reverse proxies (prevents hard-coded localhost URLs)
+      WORDPRESS_CONFIG_EXTRA: |
+        $$bv_proto = 'http';
+        if (
+          (isset($$_SERVER['HTTP_X_FORWARDED_PROTO']) && $$_SERVER['HTTP_X_FORWARDED_PROTO'] === 'https')
+          || (isset($$_SERVER['HTTPS']) && $$_SERVER['HTTPS'] === 'on')
+        ) {
+          $$bv_proto = 'https';
+        }
+
+        $$bv_host = $$_SERVER['HTTP_HOST'] ?? 'localhost';
+        if (!empty($$_SERVER['HTTP_X_FORWARDED_HOST'])) {
+          $$bv_host = $$_SERVER['HTTP_X_FORWARDED_HOST'];
+        } elseif (!empty($$_SERVER['HTTP_X_ORIGINAL_HOST'])) {
+          $$bv_host = $$_SERVER['HTTP_X_ORIGINAL_HOST'];
+        } elseif (!empty($$_SERVER['HTTP_X_FORWARDED_SERVER'])) {
+          $$bv_host = $$_SERVER['HTTP_X_FORWARDED_SERVER'];
+        }
+
+        // Try to preserve/append port when needed (fixes links like http://localhost/wp-admin/...)
+        if (strpos($$bv_host, ':') === false) {
+          $$bv_fwd_port = $$_SERVER['HTTP_X_FORWARDED_PORT'] ?? '';
+          if (!empty($$bv_fwd_port) && $$bv_fwd_port !== '80' && $$bv_fwd_port !== '443') {
+            $$bv_host .= ':' . $$bv_fwd_port;
+          } elseif ($$bv_host === 'localhost') {
+            $$bv_host .= ':' . (getenv('WP_PORT') ?: '8080');
+          }
+        }
+
+        // WordPress sometimes builds redirect_to using HTTP_HOST; normalize it for proxies.
+        $$_SERVER['HTTP_HOST'] = $$bv_host;
+        $$_SERVER['SERVER_NAME'] = $$bv_host;
+
+        define('WP_HOME', $$bv_proto . '://' . $$bv_host);
+        define('WP_SITEURL', $$bv_proto . '://' . $$bv_host);
+
+        if ($$bv_proto === 'https') {
+          define('FORCE_SSL_ADMIN', true);
+        }
+    volumes:
+      # Persist only the editable parts in git
+      - ./wp-content:/var/www/html/wp-content
+      # Raise PHP upload limits for local dev
+      - ./docker/php/uploads.ini:/usr/local/etc/php/conf.d/uploads.ini:ro
+
+  phpmyadmin:
+    image: phpmyadmin:5
+    depends_on:
+      - db
+    profiles: ["tools"]
+    restart: unless-stopped
+    ports:
+      - "${PHPMYADMIN_PORT:-8081}:80"
+    environment:
+      PMA_HOST: db
+      PMA_PORT: 3306
+
+volumes:
+  db-data:

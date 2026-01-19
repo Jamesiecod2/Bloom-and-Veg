@@ -1,0 +1,13 @@
+# Overrides for FULL-SITE restore (e.g. Duplicator package)
+# Use with a separate project name so it gets its own DB/volumes:
+#   docker compose -p clone -f docker-compose.yml -f docker-compose.clone.yml up -d
+#
+# This mounts a full WordPress docroot so installer.php can write core files.
+services:
+  wordpress:
+    volumes:
+      - ./clone/wordpress:/var/www/html
+
+  db:
+    volumes:
+      - db-data:/var/lib/mysql

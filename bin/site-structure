@@ -1,0 +1,119 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+cd "$(dirname "$0")/.."
+
+chmod +x bin/wp >/dev/null 2>&1 || true
+
+# --- helpers ---
+page_id_by_slug() {
+  local slug="$1"
+  ./bin/wp post list --post_type=page --pagename="$slug" --field=ID --format=ids 2>/dev/null | tr -d '\n'
+}
+
+page_ensure() {
+  local slug="$1"
+  local title="$2"
+  local content="${3:-}"
+
+  local id
+  id=$(page_id_by_slug "$slug")
+  if [[ -z "$id" ]]; then
+    ./bin/wp post create --post_type=page --post_status=publish --post_title="$title" --post_name="$slug" --post_content="$content" --porcelain >/dev/null
+  fi
+}
+
+menu_exists() {
+  local name="$1"
+  ./bin/wp menu list --field=name 2>/dev/null | grep -Fxq "$name"
+}
+
+menu_item_add_page() {
+  local menu="$1"
+  local page_slug="$2"
+  local title_override="${3:-}"
+
+  local page_id
+  page_id=$(page_id_by_slug "$page_slug")
+  if [[ -z "$page_id" ]]; then
+    return 0
+  fi
+
+  if [[ -n "$title_override" ]]; then
+    ./bin/wp menu item add-post "$menu" "$page_id" --title="$title_override" --porcelain
+  else
+    ./bin/wp menu item add-post "$menu" "$page_id" --porcelain
+  fi
+}
+
+menu_item_add_link() {
+  local menu="$1"
+  local title="$2"
+  local url="$3"
+  local parent_id="${4:-}"
+
+  if [[ -n "$parent_id" ]]; then
+    ./bin/wp menu item add-custom "$menu" "$title" "$url" --parent-id="$parent_id" --porcelain
+  else
+    ./bin/wp menu item add-custom "$menu" "$title" "$url" --porcelain
+  fi
+}
+
+try_assign_locations() {
+  local menu="$1"
+
+  # Try common locations; ignore failures.
+  local locations=(primary main menu-1 top header main-menu main_navigation main-navigation)
+  for loc in "${locations[@]}"; do
+    ./bin/wp menu location assign "$menu" "$loc" >/dev/null 2>&1 || true
+  done
+}
+
+# --- ensure core pages ---
+page_ensure "home" "Home" "Welcome to Bloom & Veg."
+page_ensure "about" "About" ""
+page_ensure "delivery" "Delivery" ""
+page_ensure "contact" "Contact" ""
+page_ensure "faqs" "FAQs" ""
+page_ensure "privacy-policy" "Privacy Policy" ""
+page_ensure "terms" "Terms & Conditions" ""
+
+# Make Home the front page
+HOME_ID=$(page_id_by_slug "home")
+if [[ -n "$HOME_ID" ]]; then
+  ./bin/wp option update show_on_front page >/dev/null
+  ./bin/wp option update page_on_front "$HOME_ID" >/dev/null
+fi
+
+# Ensure WooCommerce pages if possible
+if ./bin/wp plugin is-active woocommerce >/dev/null 2>&1; then
+  ./bin/wp wc tool run install_pages >/dev/null 2>&1 || true
+fi
+
+# --- menu ---
+MENU_NAME="Main Menu"
+if ! menu_exists "$MENU_NAME"; then
+  ./bin/wp menu create "$MENU_NAME" >/dev/null
+fi
+
+# Add top-level items
+menu_item_add_page "$MENU_NAME" "home" "Home" >/dev/null || true
+
+# Shop + category dropdown (these URLs match your live site structure)
+SHOP_PARENT_ID=$(menu_item_add_link "$MENU_NAME" "Shop" "/shop/" | tr -d '\n')
+
+# Shop children
+menu_item_add_link "$MENU_NAME" "Fruit & Veg" "/product-category/groceries/" "$SHOP_PARENT_ID" >/dev/null || true
+menu_item_add_link "$MENU_NAME" "Dairy, Eggs & Chilled" "/product-category/dairy/" "$SHOP_PARENT_ID" >/dev/null || true
+menu_item_add_link "$MENU_NAME" "Bakery" "/product-category/bakery/" "$SHOP_PARENT_ID" >/dev/null || true
+menu_item_add_link "$MENU_NAME" "Food Cupboard" "/product-category/food-cupboard/" "$SHOP_PARENT_ID" >/dev/null || true
+
+menu_item_add_page "$MENU_NAME" "about" "About" >/dev/null || true
+menu_item_add_page "$MENU_NAME" "delivery" "Delivery" >/dev/null || true
+menu_item_add_page "$MENU_NAME" "faqs" "FAQs" >/dev/null || true
+menu_item_add_page "$MENU_NAME" "contact" "Contact" >/dev/null || true
+
+try_assign_locations "$MENU_NAME"
+
+echo "Done. Pages + menu created."
+echo "Now check WP Admin → Appearance → Menus (or Editor) to assign/adjust."
